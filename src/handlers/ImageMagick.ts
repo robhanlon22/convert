@@ -29,6 +29,7 @@ class ImageMagickHandler implements FormatHandler {
     Magick.supportedFormats.forEach(format => {
       const formatName = format.format.toLowerCase();
       if (formatName === "apng") return;
+      if (formatName === "svg") return;
       const mimeType = format.mimeType || mime.getType(formatName);
       if (
         !mimeType
@@ -38,12 +39,14 @@ class ImageMagickHandler implements FormatHandler {
       ) return;
       this.supportedFormats.push({
         name: format.description,
-        format: formatName,
+        format: formatName === "jpg" ? "jpeg" : formatName,
         extension: formatName,
         mime: normalizeMimeType(mimeType),
         from: format.supportsReading,
         to: format.supportsWriting,
-        internal: format.format
+        internal: format.format,
+        category: mimeType.split("/")[0],
+        lossless: ["png", "bmp", "tiff"].includes(formatName)
       });
     });
 
@@ -73,9 +76,15 @@ class ImageMagickHandler implements FormatHandler {
     const inputSettings = new MagickReadSettings();
     inputSettings.format = inputMagickFormat;
 
+
     const bytes: Uint8Array = await new Promise(resolve => {
       MagickImageCollection.use(outputCollection => {
         for (const inputFile of inputFiles) {
+           if (inputFormat.format == "rgb") {
+             // Guess how big the Image should be
+             inputSettings.width = Math.sqrt(inputFile.bytes.length / 3);
+             inputSettings.height = inputSettings.width;
+           }
           MagickImageCollection.use(fileCollection => {
             fileCollection.read(inputFile.bytes, inputSettings);
             while (fileCollection.length > 0) {

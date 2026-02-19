@@ -1,64 +1,18 @@
+import CommonFormats from "src/CommonFormats.ts";
 import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
+import { imageToText, rgbaToGrayscale } from "./image-to-txt/src/convert.ts";
 
 class canvasToBlobHandler implements FormatHandler {
 
   public name: string = "canvasToBlob";
 
   public supportedFormats: FileFormat[] = [
-    {
-      name: "Portable Network Graphics",
-      format: "png",
-      extension: "png",
-      mime: "image/png",
-      from: true,
-      to: true,
-      internal: "png"
-    },
-    {
-      name: "Joint Photographic Experts Group JFIF",
-      format: "jpeg",
-      extension: "jpg",
-      mime: "image/jpeg",
-      from: true,
-      to: true,
-      internal: "jpeg"
-    },
-    {
-      name: "WebP",
-      format: "webp",
-      extension: "webp",
-      mime: "image/webp",
-      from: true,
-      to: true,
-      internal: "webp"
-    },
-    {
-      name: "CompuServe Graphics Interchange Format (GIF)",
-      format: "gif",
-      extension: "gif",
-      mime: "image/gif",
-      from: true,
-      to: false,
-      internal: "gif"
-    },
-    {
-      name: "Scalable Vector Graphics",
-      format: "svg",
-      extension: "svg",
-      mime: "image/svg+xml",
-      from: true,
-      to: false,
-      internal: "svg"
-    },
-    {
-      name: "Plain Text",
-      format: "text",
-      extension: "txt",
-      mime: "text/plain",
-      from: true,
-      to: false,
-      internal: "text"
-    }
+    CommonFormats.PNG.supported("png", true, true, true),
+    CommonFormats.JPEG.supported("jpeg", true, true),
+    CommonFormats.WEBP.supported("webp", true, true),
+    CommonFormats.GIF.supported("gif", true, false),
+    CommonFormats.SVG.supported("svg", true, false),
+    CommonFormats.TEXT.supported("text", true, true)
   ];
 
   #canvas?: HTMLCanvasElement;
@@ -89,11 +43,19 @@ class canvasToBlobHandler implements FormatHandler {
 
         const font = "48px sans-serif";
         const fontSize = parseInt(font);
+        const footerPadding = fontSize * 0.5;
         const string = new TextDecoder().decode(inputFile.bytes);
+        const lines = string.split("\n");
+
+        let maxLineWidth = 0;
+        for (const line of lines) {
+          const width = this.#ctx.measureText(line).width;
+          if (width > maxLineWidth) maxLineWidth = width;
+        }
 
         this.#ctx.font = font;
-        this.#canvas.width = this.#ctx.measureText(string).width;
-        this.#canvas.height = Math.floor(fontSize * 1.5);
+        this.#canvas.width = maxLineWidth;
+        this.#canvas.height = Math.floor(fontSize * lines.length + footerPadding);
 
         if (outputFormat.mime === "image/jpeg") {
           this.#ctx.fillStyle = "white";
@@ -102,8 +64,12 @@ class canvasToBlobHandler implements FormatHandler {
         this.#ctx.fillStyle = "black";
         this.#ctx.strokeStyle = "white";
         this.#ctx.font = font;
-        this.#ctx.fillText(string, 0, fontSize);
-        this.#ctx.strokeText(string, 0, fontSize);
+
+        for (let i = 0; i < lines.length; i ++) {
+          const line = lines[i];
+          this.#ctx.fillText(line, 0, fontSize * (i + 1));
+          this.#ctx.strokeText(line, 0, fontSize * (i + 1));
+        }
 
       } else {
 
@@ -127,12 +93,27 @@ class canvasToBlobHandler implements FormatHandler {
 
       }
 
-      const bytes: Uint8Array = await new Promise((resolve, reject) => {
-        this.#canvas!.toBlob((blob) => {
-          if (!blob) return reject("Canvas output failed");
-          blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
-        }, outputFormat.mime);
-      });
+      let bytes: Uint8Array;
+      if(outputFormat.mime == "text/plain") {
+        const pixels = this.#ctx.getImageData(0, 0, this.#canvas.width, this.#canvas.height);
+        bytes = new TextEncoder().encode(imageToText({
+          width() { return pixels.width; },
+          height() { return pixels.height; },
+          getPixel(x: number, y: number) {
+            const index = (y*pixels.width + x)*4;
+            return rgbaToGrayscale(pixels.data[index]/255, pixels.data[index+1]/255, pixels.data[index+2]/255, pixels.data[index+3]/255);
+          }
+        }));
+      }
+      else {
+        bytes = await new Promise((resolve, reject) => {
+          this.#canvas!.toBlob((blob) => {
+            if (!blob) return reject("Canvas output failed");
+            blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
+          }, outputFormat.mime);
+        });
+      }
+
       const name = inputFile.name.split(".")[0] + "." + outputFormat.extension;
 
       outputFiles.push({ bytes, name });

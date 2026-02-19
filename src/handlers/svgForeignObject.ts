@@ -1,3 +1,4 @@
+import CommonFormats from "src/CommonFormats.ts";
 import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
 
 class svgForeignObjectHandler implements FormatHandler {
@@ -5,24 +6,9 @@ class svgForeignObjectHandler implements FormatHandler {
   public name: string = "svgForeignObject";
 
   public supportedFormats: FileFormat[] = [
-    {
-      name: "Hypertext Markup Language",
-      format: "html",
-      extension: "html",
-      mime: "text/html",
-      from: true,
-      to: false,
-      internal: "html"
-    },
-    {
-      name: "Scalable Vector Graphics",
-      format: "svg",
-      extension: "svg",
-      mime: "image/svg+xml",
-      from: false,
-      to: true,
-      internal: "svg"
-    }
+    CommonFormats.HTML.supported("html", true, false),
+    // Identical to the input HTML, just wrapped in an SVG foreignObject, so it's lossless
+    CommonFormats.SVG.supported("svg", false, true, true)
   ];
 
   public ready: boolean = true;
@@ -42,10 +28,9 @@ class svgForeignObjectHandler implements FormatHandler {
     document.body.appendChild(dummy);
 
     // Add a DOM shadow to the dummy to "sterilize" it.
-    // We also clear all styles within the shadow to be doubly sure.
     const shadow = dummy.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
-    style.textContent = "*{all:initial;box-sizing:border-box;}";
+    style.textContent = ":host>div{display:flow-root;}";
     shadow.appendChild(style);
 
     // Create a div within the shadow DOM to act as
@@ -56,9 +41,10 @@ class svgForeignObjectHandler implements FormatHandler {
 
     // Wait for all images to finish loading. This is required for layout
     // changes, not because we actually care about the image contents.
-    const images = container.querySelectorAll("img");
+    const images = container.querySelectorAll("img, video");
     const promises = Array.from(images).map(image => new Promise(resolve => {
       image.addEventListener("load", resolve);
+      image.addEventListener("loadeddata", resolve);
       image.addEventListener("error", resolve);
     }));
     await Promise.all(promises);
@@ -101,11 +87,11 @@ class svgForeignObjectHandler implements FormatHandler {
       const html = decoder.decode(bytes);
       const { xml, bbox } = await svgForeignObjectHandler.normalizeHTML(html);
       const svg = (
-`<svg width="${bbox.width}" height="${bbox.height * 1.5}" xmlns="http://www.w3.org/2000/svg">
-<foreignObject x="0" y="0" width="${bbox.width}" height="${bbox.height * 1.5}">
-${xml}
-</foreignObject>
-</svg>`);
+        `<svg width="${bbox.width}" height="${bbox.height}" xmlns="http://www.w3.org/2000/svg">
+        <foreignObject x="0" y="0" width="${bbox.width}" height="${bbox.height}">
+        ${xml}
+        </foreignObject>
+        </svg>`);
       const outputBytes = encoder.encode(svg);
       const newName = (name.endsWith(".html") ? name.slice(0, -5) : name) + ".svg";
       outputFiles.push({ name: newName, bytes: outputBytes });
